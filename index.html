@@ -185,8 +185,6 @@ path {
                         }
                         Xhat.push({ 'x': (Math.min(...tempx) + deltaRange * i) / 10000 - Math.min(...orgtempx), 'y': yhat / 10000 + Math.min(...orgtempy) });
                     }
-
-
                     svg.selectAll(".line")
                         .datum(Xhat)
                         .transition()
