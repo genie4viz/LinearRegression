@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+
+<head>
+    <style>
+        .axis {
+  font: 10px sans-serif;
+}
+path { 
+    stroke: steelblue;
+    stroke-width: 2;
+    fill: none;
+}
+
+.errors {
+	fill: red;
+	fill-opacity: 0.4;
+}
+.axis path,
+.axis line {
+  fill: none;
+  stroke: #000;
+  shape-rendering: crispEdges;
+}
+</style>
+</head>
+
+<body>
+    <form>
+        <label id="label">lambda: 0.00001</label>
+        <input type="range" id="points" min="0" max="50" value="0" step="1">
+    </form>
+    <p id="dof">Estimated Degrees of Freedom: </p>
+    <input type="file" id="fileinput">
+    <script src="LinearRegression.js"></script>
+    <script src="Splines.js"></script>
+    <script src="d3.v4.min.js"></script>
+    <script>        
+        function readSingleFile(evt) {
+            //Retrieve the first (and only!) File from the FileList object
+            var f = evt.target.files[0];
+
+            if (f) {
+                var r = new FileReader();
+                r.onload = function (e) {                    
+                    jd = JSON.parse(e.target.result);                    
+                    draw_json_data(jd);                    
+                }
+                r.readAsText(f);
+            } else {
+                alert("Failed to load file");
+            }
+        }
+        document.getElementById('fileinput').addEventListener('change', readSingleFile, false);
+
+        function draw_json_data(jdata) {
+            console.log(jdata);
+            var data = [], orgdata = [];
+            var tempx = [], tempy = [], orgtempx = [], orgtempy = [];
+
+            var newx, newy;
+            for (var i = 0; i < jdata.length; i++) {
+                orgtempx.push(jdata[i].lat);
+                orgtempy.push(jdata[i].lng);
+                orgdata.push({ 'x': jdata[i].lat, 'y': jdata[i].lng });
+            }
+
+            for (var i = 0; i < jdata.length; i++) {
+                //var a = Math.round(600 * Math.random()) / 100;
+                newx = (jdata[i].lat / 1 + Math.min(...orgtempx)) * 10000;
+                newy = (jdata[i].lng / 1 - Math.min(...orgtempy)) * 10000;
+                tempx.push(newx);
+                tempy.push(newy);
+                data.push({ 'x': newx, 'y': newy });//0.9 * Math.sin(a) + (0.25 * Math.random()) - 0.125 });
+                orgtempx.push(jdata[i].lat);
+                orgtempy.push(jdata[i].lng);
+                orgdata.push({ 'x': jdata[i].lat, 'y': jdata[i].lng });
+            }
+
+            var lambda = 0.00001 * Math.pow(2, + document.getElementById("points").value);
+            var basis = smoothingSplines(data, data);
+            var output = RidgeRegression(basis, lambda),
+                params = output[0],
+                dof = output[1];
+
+            dof = Math.round(dof * 100) / 100;
+
+            d3.select("#dof")
+                .text("Estimated Degrees of Freedom: " + dof);
+            // Generate smooth line
+            var Xhat = [],
+                i = 0,
+                j = 0;
+
+            var deltaRange = (Math.max(...tempx) - Math.min(...tempx)) / 600;
+            for (i = 1; i < 600; i++) {
+                var val = smoothingSplines([{ 'x': Math.min(...tempx) + deltaRange * i, 'y': 0 }], data);
+
+                var yhat = 0.0;
+                for (j = 0; j < params.length; j++) {
+                    yhat += params[j][0] * val.x[0][j];
+                }
+                Xhat.push({ 'x': (Math.min(...tempx) + deltaRange * i) / 10000 - Math.min(...orgtempx), 'y': yhat / 10000 + Math.min(...orgtempy) });
+            }
+
+
+            var margin = { top: 80, right: 180, bottom: 80, left: 180 },
+                width = 960 - margin.left - margin.right,
+                height = 500 - margin.top - margin.bottom;
+
+            var svg = d3.select("body").append("svg")
+                .attr("width", width + margin.left + margin.right)
+                .attr("height", height + margin.top + margin.bottom)
+                .append("g")
+                .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+            var y = d3.scaleLinear()
+                .domain([Math.min(...orgtempy), Math.max(...orgtempy)])
+                .range([height, 0]);
+
+            var x = d3.scaleLinear()
+                .domain([Math.min(...orgtempx), Math.max(...orgtempx)])
+                .range([0, width])
+
+            var xAxis = d3.axisBottom(x);
+            var yAxis = d3.axisLeft(y);
+
+            var line = d3.line()
+                .x(d => x(d.x))
+                .y(d => y(d.y));
+
+            svg.append("g")
+                .attr("class", "x axis")
+                .attr("transform", "translate(0," + height + ")")
+                .call(xAxis)
+
+            svg.append("g")
+                .attr("class", "y axis")
+                .call(yAxis);
+
+            svg.selectAll(".dot")
+                .data(orgdata)
+                .enter().append("circle")
+                .attr("class", "dot")
+                .attr("r", 3.5)
+                .attr("cx", function (d) {
+                    return x(d.x);
+                })
+                .attr("cy", function (d) {
+                    return y(d.y)
+                })
+                .style("fill", "black");
+
+            svg.append("path")
+                .datum(Xhat)
+                .attr("class", "line")
+                .attr("d", line);
+
+
+            d3.select("#points")
+                .on("change", function (d) {
+
+                    var lambda = 0.00001 * Math.pow(2, +document.getElementById("points").value);
+                    d3.select("label")
+                        .text("lambda: " + lambda);
+
+                    var output = RidgeRegression(basis, +lambda),
+                        params = output[0],
+                        dof = output[1];
+
+                    dof = Math.round(dof * 100) / 100;
+                    d3.select("#dof")
+                        .text("Estimated Degrees of Freedom: " + dof);
+
+                    var Xhat = [],
+                        i = 0,
+                        j = 0;
+                    var deltaRange = (Math.max(...tempx) - Math.min(...tempx)) / 600;
+                    for (i = 1; i < 600; i++) {
+                        var val = smoothingSplines([{ 'x': Math.min(...tempx) + deltaRange * i, 'y': 0 }], data);
+
+                        var yhat = 0.0;
+                        for (j = 0; j < params.length; j++) {
+                            yhat += params[j][0] * val.x[0][j];
+                        }
+                        Xhat.push({ 'x': (Math.min(...tempx) + deltaRange * i) / 10000 - Math.min(...orgtempx), 'y': yhat / 10000 + Math.min(...orgtempy) });
+                    }
+
+
+                    svg.selectAll(".line")
+                        .datum(Xhat)
+                        .transition()
+                        .attr("class", "line")
+                        .attr("d", line);
+
+                });
+        }
+    </script>
+</body>
